@@ -4,10 +4,14 @@ import com.google.gson.annotations.SerializedName
 
 data class Product(
     val id: String,
-    val name: String,
-    val price: Double,
-    val category: String,
-    // DAPAT image_url (may underscore) para tugma sa D1 Database mo
+    @SerializedName("item_code")
+    val itemCode: String,
+    @SerializedName("item_description")
+    val itemDescription: String,
+    @SerializedName("sub_category")
+    val subCategory: String,
+    @SerializedName("net_price")
+    val netPrice: Double,
     @SerializedName("image_url")
     val imageUrl: String
 )

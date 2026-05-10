@@ -1,23 +1,28 @@
 package com.rushme.ph
 
 import android.os.Bundle
-import android.util.Log // Idinagdag para sa debugging
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.rushme.ph.ui.theme.RushmeTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,22 +35,24 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     try {
                         productList = ApiService.getInstance().getProducts()
-                        // Debug: I-check kung may laman ang imageUrl pagkatapos ng API call
-                        productList.forEach {
-                            Log.d("RUSHME_DEBUG", "Product: ${it.name}, URL: ${it.imageUrl}")
-                        }
+                        Log.d("RUSHME_DEBUG", "Data loaded: ${productList.size} items")
                     } catch (e: Exception) {
                         Log.e("RUSHME_DEBUG", "API Error: ${e.message}")
-                        e.printStackTrace()
                     } finally {
                         isLoading = false
                     }
                 }
 
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = Color(0xFFF5F5F5)
+                ) {
                     if (isLoading) {
-                        Box(contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                        Box(contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = Color(0xFFD32F2F))
+                        }
                     } else {
+                        // Ipinapasa natin ang productList sa Main Screen
                         RushmeMainScreen(productList)
                     }
                 }
@@ -56,26 +63,76 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RushmeMainScreen(products: List<Product>) {
+fun RushmeMainScreen(initialProducts: List<Product>) {
+    var searchQuery by remember { mutableStateOf("") }
+    // Ginagawa nating mutable ang listahan para ma-update pag nag-refresh
+    var products by remember { mutableStateOf(initialProducts) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    val pullToRefreshState = rememberPullToRefreshState()
+
+    // Logic para sa Search
+    val filteredProducts = products.filter {
+        it.itemCode.contains(searchQuery, ignoreCase = true) ||
+                it.itemDescription.contains(searchQuery, ignoreCase = true)
+    }
+
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("RUSHME PH", fontWeight = FontWeight.ExtraBold) },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = Color(0xFF6750A4),
-                    titleContentColor = Color.White
+            Column(modifier = Modifier.background(Color(0xFFD32F2F))) {
+                CenterAlignedTopAppBar(
+                    title = { Text("RUSHME BILLIARD BROCHURE", color = Color.White, fontWeight = FontWeight.ExtraBold) },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color(0xFFD32F2F)
+                    )
                 )
-            )
+                TextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    placeholder = { Text("Search Item Code or Description...") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.White,
+                        unfocusedContainerColor = Color.White,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                    )
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
         }
     ) { padding ->
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            modifier = Modifier.padding(padding).padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        // ITO ANG DINAGDAG PARA SA SCROLL DOWN REFRESH
+        PullToRefreshBox(
+            state = pullToRefreshState,
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                isRefreshing = true
+                coroutineScope.launch {
+                    try {
+                        val newProducts = ApiService.getInstance().getProducts()
+                        products = newProducts
+                    } catch (e: Exception) {
+                        Log.e("RUSHME_REFRESH", "Error: ${e.message}")
+                    } finally {
+                        isRefreshing = false
+                    }
+                }
+            },
+            modifier = Modifier.padding(padding).fillMaxSize()
         ) {
-            items(products) { product ->
-                ProductCard(product)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(filteredProducts) { product ->
+                    ProductCard(product)
+                }
             }
         }
     }
@@ -83,25 +140,52 @@ fun RushmeMainScreen(products: List<Product>) {
 
 @Composable
 fun ProductCard(product: Product) {
-    Card(elevation = CardDefaults.cardElevation(4.dp)) {
-        Column {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(2.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             AsyncImage(
                 model = product.imageUrl,
                 contentDescription = null,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(150.dp),
+                    .size(100.dp)
+                    .clip(RoundedCornerShape(6.dp)),
                 contentScale = ContentScale.Crop,
-                // Idinagdag ang OnError para mahuli ang rason ng pagkabigo
-                onError = { error ->
-                    Log.e("RUSHME_IMAGE_ERROR", "Failed to load: ${product.imageUrl}")
-                    Log.e("RUSHME_IMAGE_ERROR", "Reason: ${error.result.throwable.message}")
-                }
+                onError = { Log.e("IMAGE_ERROR", "Failed to load image for ${product.itemCode}") }
             )
-            Column(modifier = Modifier.padding(8.dp)) {
-                Text(product.name, fontWeight = FontWeight.Bold, maxLines = 1)
-                Text("₱${product.price}", color = Color(0xFFE91E63), fontWeight = FontWeight.Black)
-                Text(product.category, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = product.itemCode,
+                    color = Color(0xFFD32F2F),
+                    fontWeight = FontWeight.ExtraBold,
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Text(
+                    text = product.itemDescription,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2
+                )
+                Text(
+                    text = "Category: ${product.subCategory}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "₱${product.netPrice}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    color = Color.Black
+                )
             }
         }
     }
